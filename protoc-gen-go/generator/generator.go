@@ -646,11 +646,12 @@ func (g *Generator) CommandLineParameters(parameter string) {
 // If its file is in a different package, it returns the package name we're using for this file, plus ".".
 // Otherwise it returns the empty string.
 func (g *Generator) DefaultPackageName(obj Object) string {
-	pkg := obj.PackageName()
-	if pkg == g.packageName {
+	pkg := GoPackageName(obj.File())
+	if pkg == GoPackageName(g.file) {
 		return ""
 	}
-	return pkg + "."
+	importAlias := strings.Map(badToUnderscore, pkg)
+	return importAlias + "."
 }
 
 // For each input file, the unique package name to use, underscored.
@@ -665,12 +666,12 @@ var pkgNamesInUse = make(map[string]bool)
 // has no file descriptor.
 func RegisterUniquePackageName(pkg string, f *FileDescriptor) string {
 	// Convert dots to underscores before finding a unique alias.
-	pkg = strings.Map(badToUnderscore, pkg)
-
-	for i, orig := 1, pkg; pkgNamesInUse[pkg]; i++ {
-		// It's a duplicate; must rename.
-		pkg = orig + strconv.Itoa(i)
+	if f != nil {
+		pkg = GoPackageName(f)
 	}
+	pkgs := strings.Split(pkg, ".")
+	pkg = pkgs[len(pkgs)-1]
+
 	// Install it.
 	pkgNamesInUse[pkg] = true
 	if f != nil {
@@ -1323,32 +1324,37 @@ func (g *Generator) generateImports() {
 	g.P("import " + g.Pkg["proto"] + " " + strconv.Quote(g.ImportPrefix+"github.com/golang/protobuf/proto"))
 	g.P("import " + g.Pkg["fmt"] + ` "fmt"`)
 	g.P("import " + g.Pkg["math"] + ` "math"`)
+	alreadyImported := make(map[string]bool)
 	for i, s := range g.file.Dependency {
-		fd := g.fileByName(s)
+		dependencyPkg := GoPackageName(g.fileByName(s))
+
 		// Do not import our own package.
-		if fd.PackageName() == g.packageName {
+		if dependencyPkg == GoPackageName(g.file) {
 			continue
 		}
-		filename := fd.goFileName()
-		// By default, import path is the dirname of the Go filename.
-		importPath := path.Dir(filename)
+		importPath := strings.Map(dotToSlash, dependencyPkg)
 		if substitution, ok := g.ImportMap[s]; ok {
 			importPath = substitution
 		}
 		importPath = g.ImportPrefix + importPath
 		// Skip weak imports.
 		if g.weak(int32(i)) {
-			g.P("// skipping weak import ", fd.PackageName(), " ", strconv.Quote(importPath))
+			g.P("// skipping weak import ", importPath, " ", strconv.Quote(goFileName(s)))
 			continue
 		}
-		// We need to import all the dependencies, even if we don't reference them,
+
+		// we need to import all the dependencies, even if we don't reference them,
 		// because other code and tools depend on having the full transitive closure
 		// of protocol buffer types in the binary.
-		pname := fd.PackageName()
-		if _, ok := g.usedPackages[pname]; !ok {
-			pname = "_"
+		importAlias := strings.Map(badToUnderscore, dependencyPkg)
+		if _, ok := alreadyImported[importAlias]; ok {
+			continue
 		}
-		g.P("import ", pname, " ", strconv.Quote(importPath))
+		alreadyImported[importAlias] = true
+		if _, ok := g.usedPackages[importAlias]; !ok {
+			importAlias = "_" // note: this might interact badly with alreadyImported
+		}
+		g.P("import ", importAlias, " ", strconv.Quote(importPath))
 	}
 	g.P()
 	// TODO: may need to worry about uniqueness across plugins
@@ -1380,10 +1386,12 @@ func (g *Generator) generateImported(id *ImportedDescriptor) {
 		}
 	}
 	g.P("// ", sn, " from public import ", filename)
-	g.usedPackages[df.PackageName()] = true
+
+	importAlias := strings.Map(badToUnderscore, GoPackageName(df))
+	g.usedPackages[importAlias] = true
 
 	for _, sym := range df.exported[id.o] {
-		sym.GenerateAlias(g, df.PackageName())
+		sym.GenerateAlias(g, df.GetPackage())
 	}
 
 	g.P()
@@ -1686,7 +1694,8 @@ func (g *Generator) RecordTypeUse(t string) {
 	if obj, ok := g.typeNameToObject[t]; ok {
 		// Call ObjectNamed to get the true object to record the use.
 		obj = g.ObjectNamed(t)
-		g.usedPackages[obj.PackageName()] = true
+		importAlias := strings.Map(badToUnderscore, GoPackageName(obj.File()))
+		g.usedPackages[importAlias] = true
 	}
 }
 
@@ -2719,6 +2728,40 @@ func CamelCaseSlice(elem []string) string { return CamelCase(strings.Join(elem, 
 // dottedSlice turns a sliced name into a dotted name.
 func dottedSlice(elem []string) string { return strings.Join(elem, ".") }
 
+// Given a .proto file name, return the output name for the generated Go program.
+func goFileName(name string) string {
+	ext := path.Ext(name)
+	if ext == ".proto" || ext == ".protodevel" {
+		name = name[0 : len(name)-len(ext)]
+	}
+	return name + ".pb.go"
+}
+
+type fileDescriptorLike interface {
+	GetOptions() *descriptor.FileOptions
+	GetName() string
+	GetPackage() string
+}
+
+// Given the original file descriptor, return the desired go package name.
+// This solves the problem of (proto) package level import cycles
+// by allowing proto files to declare go package for import.
+func GoPackageName(f fileDescriptorLike) string {
+	// Does the file have a "go_package" option
+	if opts := f.GetOptions(); opts != nil {
+		if pkg := opts.GetGoPackage(); pkg != "" {
+			return pkg
+		}
+	}
+
+	// Does the file have a package clause?
+	if pkg := f.GetPackage(); pkg != "" {
+		return pkg
+	}
+	// Use the file base name.
+	return baseName(f.GetName())
+}
+
 // Is this field optional?
 func isOptional(field *descriptor.FieldDescriptorProto) bool {
 	return field.Label != nil && *field.Label == descriptor.FieldDescriptorProto_LABEL_OPTIONAL
@@ -2768,6 +2811,13 @@ func badToUnderscore(r rune) rune {
 		return r
 	}
 	return '_'
+}
+
+func dotToSlash(r rune) rune {
+	if r == '.' {
+		return '/'
+	}
+	return badToUnderscore(r)
 }
 
 // baseName returns the last path element of the name, with the last dotted suffix removed.
