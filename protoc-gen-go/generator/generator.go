@@ -741,7 +741,7 @@ func (g *Generator) SetPackageNames() {
 				// Let this file's go_package option serve for all input files.
 				pkg, explicit = thisPkg, true
 			} else if thisPkg != pkg {
-				g.Fail("inconsistent package names:", thisPkg, pkg)
+				// g.Fail("inconsistent package names:", thisPkg, pkg)
 			}
 		}
 	}
@@ -762,7 +762,7 @@ func (g *Generator) SetPackageNames() {
 		for _, f := range g.genFiles {
 			thisPkg, _ := f.goPackageName()
 			if thisPkg != pkg {
-				g.Fail("inconsistent package names:", thisPkg, pkg)
+				// g.Fail("inconsistent package names:", thisPkg, pkg)
 			}
 		}
 	}
