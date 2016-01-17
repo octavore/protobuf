@@ -315,22 +315,16 @@ func (d *FileDescriptor) goPackageName() (name string, explicit bool) {
 
 // goFileName returns the output name for the generated Go file.
 func (d *FileDescriptor) goFileName() string {
-	name := *d.Name
-	if ext := path.Ext(name); ext == ".proto" || ext == ".protodevel" {
-		name = name[:len(name)-len(ext)]
+	if d.Package == nil {
+		log.Fatal(d.GetName() + " is missing a proto `package` statement")
 	}
-	name += ".pb.go"
-
-	// Does the file have a "go_package" option?
-	// If it does, it may override the filename.
-	if impPath, _, ok := d.goPackageOption(); ok && impPath != "" {
-		// Replace the existing dirname with the declared import path.
-		_, name = path.Split(name)
-		name = path.Join(impPath, name)
-		return name
+	name := strings.Map(dotToSlash, GoPackageName(d)) + "/" + path.Base(d.GetName())
+	ext := path.Ext(name)
+	if ext == ".proto" || ext == ".protodevel" {
+		name = name[0 : len(name)-len(ext)]
 	}
-
-	return name
+	log.Println(fmt.Sprintf("%s -> %s.pb.go", d.GetName(), name))
+	return name + ".pb.go"
 }
 
 func (d *FileDescriptor) addExport(obj Object, sym symbol) {
@@ -1339,7 +1333,7 @@ func (g *Generator) generateImports() {
 		importPath = g.ImportPrefix + importPath
 		// Skip weak imports.
 		if g.weak(int32(i)) {
-			g.P("// skipping weak import ", importPath, " ", strconv.Quote(goFileName(s)))
+			g.P("// skipping weak import ", importPath, " ", dependencyPkg)
 			continue
 		}
 
@@ -2727,15 +2721,6 @@ func CamelCaseSlice(elem []string) string { return CamelCase(strings.Join(elem, 
 
 // dottedSlice turns a sliced name into a dotted name.
 func dottedSlice(elem []string) string { return strings.Join(elem, ".") }
-
-// Given a .proto file name, return the output name for the generated Go program.
-func goFileName(name string) string {
-	ext := path.Ext(name)
-	if ext == ".proto" || ext == ".protodevel" {
-		name = name[0 : len(name)-len(ext)]
-	}
-	return name + ".pb.go"
-}
 
 type fileDescriptorLike interface {
 	GetOptions() *descriptor.FileOptions
