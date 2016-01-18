@@ -180,7 +180,7 @@ func (g *grpc) generateService(file *generator.FileDescriptor, service *pb.Servi
 	g.P()
 
 	var methodIndex, streamIndex int
-	serviceDescVar := "_" + servName + "_serviceDesc"
+	serviceDescVar := servName + "_serviceDesc"
 	// Client method implementations.
 	for _, method := range service.Method {
 		var descExpr string
@@ -223,6 +223,7 @@ func (g *grpc) generateService(file *generator.FileDescriptor, service *pb.Servi
 	}
 
 	// Service descriptor.
+	g.P("const ", servName+"Name", " = ", strconv.Quote(fullServName))
 	g.P("var ", serviceDescVar, " = ", grpcPkg, ".ServiceDesc {")
 	g.P("ServiceName: ", strconv.Quote(fullServName), ",")
 	g.P("HandlerType: (*", serverType, ")(nil),")
