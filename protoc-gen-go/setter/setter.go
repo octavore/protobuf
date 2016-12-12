@@ -1,6 +1,10 @@
 package setter
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/golang/protobuf/protoc-gen-go/generator"
 )
 
@@ -30,7 +34,15 @@ func (s *SetterPlugin) Generate(file *generator.FileDescriptor) {
 		ccName := generator.CamelCase(msg.GetName())
 		for _, f := range msg.GetField() {
 			ccFieldName := generator.CamelCase(f.GetName())
+			if f.OneofIndex != nil {
+				continue // unsupport oneof
+			}
+
 			typ, _ := s.g.GoType(nil, f)
+			if mt, ok := s.getMapType(f); ok {
+				typ = mt
+			}
+
 			s.g.P("func (m *", ccName, ") Set", ccFieldName, "(v ", typ, ") {")
 			s.g.P("  m.", ccFieldName, "= v")
 			s.g.P("}")
@@ -38,6 +50,35 @@ func (s *SetterPlugin) Generate(file *generator.FileDescriptor) {
 		}
 	}
 
+}
+
+func (s *SetterPlugin) getMapType(field *descriptor.FieldDescriptorProto) (string, bool) {
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		desc := s.g.ObjectNamed(field.GetTypeName())
+		if d, ok := desc.(*generator.Descriptor); ok && d.GetOptions().GetMapEntry() {
+			// Figure out the Go types and tags for the key and value types.
+			keyField, valField := d.Field[0], d.Field[1]
+			keyType, _ := s.g.GoType(d, keyField)
+			valType, _ := s.g.GoType(d, valField)
+
+			// We don't use stars, except for message-typed values.
+			// Message and enum types are the only two possibly foreign types used in maps,
+			// so record their use. They are not permitted as map keys.
+			keyType = strings.TrimPrefix(keyType, "*")
+			switch *valField.Type {
+			case descriptor.FieldDescriptorProto_TYPE_ENUM:
+				valType = strings.TrimPrefix(valType, "*")
+				s.g.RecordTypeUse(valField.GetTypeName())
+			case descriptor.FieldDescriptorProto_TYPE_MESSAGE:
+				s.g.RecordTypeUse(valField.GetTypeName())
+			default:
+				valType = strings.TrimPrefix(valType, "*")
+			}
+
+			return fmt.Sprintf("map[%s]%s", keyType, valType), true
+		}
+	}
+	return "", false
 }
 
 func (s *SetterPlugin) GenerateImports(file *generator.FileDescriptor) {}

@@ -788,15 +788,9 @@ AllFiles:
 		for _, genf := range g.genFiles {
 			if f == genf {
 				// In this package already.
-				uniquePackageName[f.FileDescriptorProto] = g.packageName
+				uniquePackageName[f.FileDescriptorProto] = RegisterUniquePackageName(pkg, genf)
 				continue AllFiles
 			}
-		}
-		// The file is a dependency, so we want to ignore its go_package option
-		// because that is only relevant for its specific generated output.
-		pkg := f.GetPackage()
-		if pkg == "" {
-			pkg = baseName(*f.Name)
 		}
 		RegisterUniquePackageName(pkg, f)
 	}
