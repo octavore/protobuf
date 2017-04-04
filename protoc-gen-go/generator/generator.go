@@ -1807,7 +1807,7 @@ func (g *Generator) generateMessage(message *Descriptor) {
 			// when we've computed any disambiguation.
 			oneofInsertPoints[*field.OneofIndex] = g.Buffer.Len()
 
-			dname := "is" + ccTypeName + "_" + fname
+			dname := "Is" + ccTypeName + "_" + fname
 			oneofFieldName[*field.OneofIndex] = fname
 			oneofDisc[*field.OneofIndex] = dname
 			tag := `protobuf_oneof:"` + odp.GetName() + `"`
