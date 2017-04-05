@@ -269,29 +269,30 @@ func (d *FileDescriptor) PackageName() string { return uniquePackageOf(d.FileDes
 // it is only valid inside the generated package.
 func (d *FileDescriptor) VarName() string { return fmt.Sprintf("fileDescriptor%d", d.index) }
 
-// goPackageOption interprets the file's go_package option.
+func (d *FileDescriptor) goPackageOption() (impPath, pkg string, ok bool) {
+	return parsePackageOption(d.GetOptions().GetGoPackage())
+}
+
+// parsePackageOption interprets the file's go_package option.
 // If there is no go_package, it returns ("", "", false).
 // If there's a simple name, it returns ("", pkg, true).
 // If the option implies an import path, it returns (impPath, pkg, true).
-func (d *FileDescriptor) goPackageOption() (impPath, pkg string, ok bool) {
-	pkg = d.GetOptions().GetGoPackage()
+func parsePackageOption(pkg string) (string, string, bool) {
 	if pkg == "" {
-		return
+		return "", "", false
 	}
-	ok = true
 	// The presence of a slash implies there's an import path.
 	slash := strings.LastIndex(pkg, "/")
 	if slash < 0 {
-		return
+		return "", pkg, true
 	}
-	impPath, pkg = pkg, pkg[slash+1:]
+	impPath, pkg := pkg, pkg[slash+1:]
 	// A semicolon-delimited suffix overrides the package name.
 	sc := strings.IndexByte(impPath, ';')
 	if sc < 0 {
-		return
+		return impPath, pkg, true
 	}
-	impPath, pkg = impPath[:sc], impPath[sc+1:]
-	return
+	return impPath[:sc], impPath[sc+1:], true
 }
 
 // goPackageName returns the Go package name to use in the
@@ -2735,6 +2736,7 @@ func GoPackageName(f fileDescriptorLike) string {
 	// Does the file have a "go_package" option
 	if opts := f.GetOptions(); opts != nil {
 		if pkg := opts.GetGoPackage(); pkg != "" {
+			_, pkg, _ = parsePackageOption(pkg)
 			return pkg
 		}
 	}
